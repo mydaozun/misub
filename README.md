@@ -186,7 +186,7 @@ wrangler d1 execute misub --file=schema.sql --remote
 | 变量名 | 说明 | 示例 |
 |--------|------|------|
 | `ADMIN_PASSWORD` | 管理员登录密码 | `your_secure_password` (未设置则默认为 `admin`) |
-| `COOKIE_SECRET` | Cookie 加密密钥 | `64位随机字符串` (推荐留空，系统自动生成) |
+| `COOKIE_SECRET` | Cookie 加密密钥 | `64位随机字符串` (【推荐留空，系统自动生成】) |
 
 **可选（按需设置）：**
 
