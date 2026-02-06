@@ -28,7 +28,8 @@ const emit = defineEmits([
   'delete',
   'sort-end',
   'change-page',
-  'update:itemsPerPage' // Added
+  'update:itemsPerPage', // Added
+  'set-group-filter' // Added
 ]);
 
 const draggableModel = computed({
@@ -66,7 +67,7 @@ const handleItemsPerPageChange = (event) => {
 </script>
 
 <template>
-  <div v-if="manualNodes.length > 0">
+  <div v-if="manualNodes.length > 0" :class="{ 'pb-48': isSelectionMode }">
     <!-- 如果有搜索词，显示搜索提示 -->
     <div v-if="localSearchTerm && filteredNodes.length === 0" class="text-center py-8 text-gray-500">
       <p>没有找到包含 "{{ localSearchTerm }}" 的节点</p>
@@ -91,7 +92,8 @@ const handleItemsPerPageChange = (event) => {
                 :is-selected="selectedNodeIds.has(node.id)"
                 @toggle-select="emit('toggle-select', node.id)"
                 @edit="emit('edit', node.id)" 
-                @delete="emit('delete', node.id)" />
+                @delete="emit('delete', node.id)"
+                @filter-group="emit('set-group-filter', $event)" />
             </div>
           </template>
         </draggable>
@@ -114,6 +116,7 @@ const handleItemsPerPageChange = (event) => {
                 :style="{ '--delay-index': Math.min(index, 20) }"
                 @edit="emit('edit', node.id)"
                 @delete="emit('delete', node.id)"
+                @filter-group="emit('set-group-filter', $event)"
               />
             </div>
           </template>
@@ -137,6 +140,7 @@ const handleItemsPerPageChange = (event) => {
             @toggle-select="emit('toggle-select', node.id)"
             @edit="emit('edit', node.id)" 
             @delete="emit('delete', node.id)" 
+            @filter-group="emit('set-group-filter', $event)" 
           />
         </div>
       </div>
@@ -153,13 +157,14 @@ const handleItemsPerPageChange = (event) => {
           @toggle-select="emit('toggle-select', node.id)"
           @edit="emit('edit', node.id)"
           @delete="emit('delete', node.id)"
+          @filter-group="emit('set-group-filter', $event)"
         />
       </div>
     </div>
     
     <!-- 统一分页栏 (Static Flow) -->
     <!-- 统一分页栏 (Panel Style) -->
-    <div v-if="displayTotalPages > 1 || itemsPerPage !== 24" class="mt-4 px-4 py-3 bg-white/90 dark:bg-gray-900/80 backdrop-blur-md rounded-lg shadow-md flex flex-col sm:flex-row items-center justify-between gap-4 transition-all">
+    <div v-if="displayTotalPages > 1 || itemsPerPage !== 24" class="mt-4 px-4 py-3 bg-white/90 dark:bg-gray-900/80 backdrop-blur-md rounded-2xl shadow-md flex flex-col sm:flex-row items-center justify-between gap-4 transition-all">
       
       <!-- Left: Item Count & Page Size -->
       <div class="flex items-center space-x-4 text-xs text-gray-500 whitespace-nowrap">
@@ -169,7 +174,7 @@ const handleItemsPerPageChange = (event) => {
           <select 
             :value="itemsPerPage" 
             @change="handleItemsPerPageChange" 
-            class="form-select text-xs py-1 pl-2 pr-6 border-gray-300 rounded bg-gray-50 dark:bg-gray-900 dark:border-gray-600 focus:ring-blue-500 focus:border-blue-500"
+            class="form-select text-xs py-1 pl-2 pr-6 border-gray-300 rounded-lg bg-gray-50 dark:bg-gray-900 dark:border-gray-600 focus:ring-blue-500 focus:border-blue-500"
           >
             <option :value="24">24</option>
             <option :value="48">48</option>
@@ -184,7 +189,7 @@ const handleItemsPerPageChange = (event) => {
         <button 
           @click="handleChangePage(1)" 
           :disabled="displayPage === 1"
-          class="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-30 disabled:hover:bg-transparent transition-colors text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+          class="p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-30 disabled:hover:bg-transparent transition-colors text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
           title="第一页"
         >
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" /></svg>
@@ -192,7 +197,7 @@ const handleItemsPerPageChange = (event) => {
         <button 
           @click="handleChangePage(displayPage - 1)" 
           :disabled="displayPage === 1"
-          class="px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-30 disabled:hover:bg-transparent transition-colors text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+          class="px-2 py-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-30 disabled:hover:bg-transparent transition-colors text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
           title="上一页"
         >
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" /></svg>
@@ -204,7 +209,7 @@ const handleItemsPerPageChange = (event) => {
             v-model="pageInput" 
             @keydown.enter="jumpToPage"
             @blur="jumpToPage"
-            class="w-12 text-center text-sm py-1 border border-gray-300 dark:border-gray-600 rounded bg-gray-50 dark:bg-gray-900 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 appearance-none remove-arrow"
+            class="w-12 text-center text-sm py-1 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-900 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 appearance-none remove-arrow"
           />
           <span class="text-sm text-gray-500">/ {{ displayTotalPages }}</span>
         </div>
@@ -249,5 +254,6 @@ const handleItemsPerPageChange = (event) => {
 }
 .remove-arrow {
   -moz-appearance: textfield;
+  appearance: textfield;
 }
 </style>

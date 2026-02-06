@@ -4,7 +4,7 @@
  */
 
 import { StorageFactory } from '../storage-adapter.js';
-import { createJsonResponse, createErrorResponse } from './utils.js';
+import { getCookieSecret, getAdminPassword, setAdminPassword, isUsingDefaultPassword, createJsonResponse, createErrorResponse } from './utils.js';
 import { authMiddleware, handleLogin, handleLogout, createUnauthorizedResponse } from './auth-middleware.js';
 import { sendTgNotification, checkAndNotify } from './notifications.js';
 import { clearAllNodeCaches } from '../services/node-cache-service.js';
@@ -27,8 +27,16 @@ async function getStorageAdapter(env) {
  * @returns {Promise<Response>} HTTP响应
  */
 export async function handleDataRequest(env) {
+    let storageType = 'unknown';
     try {
-        const storageAdapter = await getStorageAdapter(env);
+        storageType = await StorageFactory.getStorageType(env);
+        if (storageType === 'd1' && !env.MISUB_DB) {
+            console.error('[API Error /data] D1 binding missing while storageType=d1');
+        }
+        if (storageType === 'kv' && !env.MISUB_KV) {
+            console.error('[API Error /data] KV binding missing while storageType=kv');
+        }
+        const storageAdapter = StorageFactory.createAdapter(env, storageType);
         const [misubs, profiles, settings] = await Promise.all([
             storageAdapter.get(KV_KEY_SUBS).then(res => res || []),
             storageAdapter.get(KV_KEY_PROFILES).then(res => res || []),
@@ -37,12 +45,19 @@ export async function handleDataRequest(env) {
         const config = {
             FileName: settings.FileName || 'MISUB',
             mytoken: settings.mytoken || 'auto',
-            profileToken: settings.profileToken || 'profiles'
+
+            profileToken: settings.profileToken || 'profiles',
+            isDefaultPassword: await isUsingDefaultPassword(env)
         };
         return createJsonResponse({ misubs, profiles, config });
     } catch (e) {
-        console.error('[API Error /data]', 'Failed to read from storage:', e);
-        return createErrorResponse('读取初始数据失败', 'APIHandler', 500);
+        console.error('[API Error /data] Failed to read from storage', {
+            error: e?.message,
+            storageType,
+            hasKv: !!env?.MISUB_KV,
+            hasD1: !!env?.MISUB_DB
+        });
+        return createErrorResponse(e, 500);
     }
 }
 
@@ -102,6 +117,13 @@ export async function handleMisubsSave(request, env) {
                 finalProfiles = applyPatch(currentProfiles, diff.profiles);
             } else {
                 finalProfiles = currentProfiles; // 无变动
+            }
+
+            if (!Array.isArray(finalMisubs) || !Array.isArray(finalProfiles)) {
+                return createJsonResponse({
+                    success: false,
+                    message: '增量更新结果格式错误，请检查补丁数据'
+                }, 400);
             }
         } else {
             // 步骤2: 验证必需字段 (仅在非Diff模式下)
@@ -201,7 +223,7 @@ export async function handleSettingsGet(env) {
         const settings = await storageAdapter.get(KV_KEY_SETTINGS) || {};
         return createJsonResponse({ ...defaultSettings, ...settings });
     } catch (e) {
-        return createErrorResponse('读取设置失败', 'APIHandler', 500);
+        return createErrorResponse('读取设置失败', 500);
     }
 }
 
@@ -233,7 +255,7 @@ export async function handleSettingsSave(request, env) {
 
         return createJsonResponse({ success: true, message: '设置已保存' });
     } catch (e) {
-        return createErrorResponse('保存设置失败', 'APIHandler', 500);
+        return createErrorResponse('保存设置失败', 500);
     }
 }
 
@@ -264,8 +286,8 @@ export async function handlePublicProfilesRequest(env) {
 
         // Hero Configuration
         const hero = {
-            title1: settings.heroTitle1 || '发现优质',
-            title2: settings.heroTitle2 || '订阅资源',
+            title1: settings.heroTitle1 || '发现',
+            title2: settings.heroTitle2 || '优质订阅',
             description: settings.heroDescription || '浏览并获取由管理员分享的精选订阅组合，一键导入到您的客户端。'
         };
 
@@ -301,7 +323,7 @@ export async function handlePublicProfilesRequest(env) {
         });
     } catch (e) {
         console.error('[API Error /public/profiles]', e);
-        return createErrorResponse('获取公开订阅组失败', 'APIHandler', 500);
+        return createErrorResponse('获取公开订阅组失败', 500);
     }
 }
 
@@ -324,6 +346,33 @@ export async function handlePublicConfig(env) {
         });
     } catch (e) {
         console.error('[API Error /public/config]', e);
-        return createErrorResponse('获取公开配置失败', 'APIHandler', 500);
+        return createErrorResponse('获取公开配置失败', 500);
+    }
+}
+
+/**
+ * 处理密码更新API
+ * @param {Object} request - HTTP请求对象
+ * @param {Object} env - Cloudflare环境对象
+ * @returns {Promise<Response>} HTTP响应
+ */
+export async function handleUpdatePassword(request, env) {
+    if (request.method !== 'POST') {
+        return createErrorResponse('Method Not Allowed', 405);
+    }
+
+    try {
+        const { password } = await request.json();
+
+        if (!password || typeof password !== 'string' || password.length < 6) {
+            return createErrorResponse('密码必须至少6位字符', 400);
+        }
+
+        await setAdminPassword(env, password);
+        return createJsonResponse({ success: true, message: '密码已更新' });
+
+    } catch (e) {
+        console.error('[API Error /settings/password]', e);
+        return createErrorResponse('Failed to update password', 500);
     }
 }

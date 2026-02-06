@@ -6,7 +6,7 @@
 import { StorageFactory, DataMigrator } from '../storage-adapter.js';
 import { createJsonResponse, createErrorResponse } from './utils.js';
 import { authMiddleware, handleLogin, handleLogout } from './auth-middleware.js';
-import { handleDataRequest, handleMisubsSave, handleSettingsGet, handleSettingsSave, handlePublicProfilesRequest, handlePublicConfig } from './api-handler.js';
+import { handleDataRequest, handleMisubsSave, handleSettingsGet, handleSettingsSave, handlePublicProfilesRequest, handlePublicConfig, handleUpdatePassword } from './api-handler.js';
 import { handleCronTrigger } from './notifications.js';
 import {
     handleSubscriptionNodesRequest,
@@ -159,6 +159,9 @@ export async function handleApiRequest(request, env) {
 
     // Special handling for /data to return 200 OK for unauthenticated requests
     if (path === '/data') {
+        if (!env?.MISUB_KV) {
+            return createErrorResponse('KV 绑定 MISUB_KV 缺失', 500);
+        }
         if (!await authMiddleware(request, env)) {
             return createJsonResponse({
                 authenticated: false,
@@ -202,7 +205,7 @@ export async function handleApiRequest(request, env) {
 
     switch (path) {
         case '/logout':
-            return await handleLogout();
+            return await handleLogout(request);
 
         case '/misubs':
             return await handleMisubsSave(request, env);
@@ -266,6 +269,9 @@ export async function handleApiRequest(request, env) {
                 return await handleSettingsSave(request, env);
             }
             return createJsonResponse('Method Not Allowed', 405);
+
+        case '/settings/password':
+            return await handleUpdatePassword(request, env);
 
         case '/guestbook/manage':
             if (request.method === 'GET') {

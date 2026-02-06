@@ -60,6 +60,75 @@ export async function conditionalKVPut(env, key, newData, oldData = null) {
     }
 }
 
+/**
+ * 获取或生成 Cookie 加密密钥
+ * 优先从 KV 读取，不存在则生成新的并保存
+ * @param {Object} env - Cloudflare环境对象
+ * @returns {Promise<string>} 密钥
+ */
+export async function getCookieSecret(env) {
+    if (!env?.MISUB_KV) {
+        throw new Error('KV 绑定 MISUB_KV 缺失');
+    }
+    // 1. 尝试从 KV 读取
+    const kvSecret = await env.MISUB_KV.get('SYSTEM_COOKIE_SECRET');
+    if (kvSecret) {
+        return kvSecret;
+    }
+
+    // 2. 兼容旧版：尝试读取环境变量
+    if (env.COOKIE_SECRET) {
+        // 将环境变量迁移到 KV 以便后续统一管理
+        await env.MISUB_KV.put('SYSTEM_COOKIE_SECRET', env.COOKIE_SECRET);
+        return env.COOKIE_SECRET;
+    }
+
+    // 3. 生成新密钥并保存
+    const newSecret = crypto.randomUUID();
+    await env.MISUB_KV.put('SYSTEM_COOKIE_SECRET', newSecret);
+    return newSecret;
+}
+
+/**
+ * 获取管理员密码
+ * 优先从 KV 读取，不存在则使用环境变量
+ * @param {Object} env - Cloudflare环境对象
+ * @returns {Promise<string>} 密码
+ */
+export async function getAdminPassword(env) {
+    if (!env?.MISUB_KV) {
+        throw new Error('KV 绑定 MISUB_KV 缺失');
+    }
+    const kvPassword = await env.MISUB_KV.get('SYSTEM_ADMIN_PASSWORD');
+    if (kvPassword) {
+        return kvPassword;
+    }
+    // Return env password if exists, otherwise default to 'admin'
+    return env.ADMIN_PASSWORD || 'admin';
+}
+
+/**
+ * 检查是否正在使用默认密码
+ * @param {Object} env 
+ * @returns {Promise<boolean>}
+ */
+export async function isUsingDefaultPassword(env) {
+    const current = await getAdminPassword(env);
+    return current === 'admin';
+}
+
+/**
+ * 设置管理员密码
+ * @param {Object} env - Cloudflare环境对象
+ * @param {string} newPassword - 新密码
+ */
+export async function setAdminPassword(env, newPassword) {
+    if (!env?.MISUB_KV) {
+        throw new Error('KV 绑定 MISUB_KV 缺失');
+    }
+    await env.MISUB_KV.put('SYSTEM_ADMIN_PASSWORD', newPassword);
+}
+
 export { formatBytes } from '../../src/shared/utils.js';
 
 /**
@@ -317,6 +386,12 @@ export function migrateConfigSettings(config) {
     if (migratedConfig.hasOwnProperty('enableTrafficNode')) {
         migratedConfig.enableTrafficNode = toBoolean(migratedConfig.enableTrafficNode);
     }
+    if (migratedConfig.hasOwnProperty('subConverterScv')) {
+        migratedConfig.subConverterScv = toBoolean(migratedConfig.subConverterScv);
+    }
+    if (migratedConfig.hasOwnProperty('subConverterUdp')) {
+        migratedConfig.subConverterUdp = toBoolean(migratedConfig.subConverterUdp);
+    }
 
     return migratedConfig;
 }
@@ -343,6 +418,27 @@ export function createJsonResponse(data, status = 200, headers = {}) {
 }
 
 /**
+ * 获取用于外部回调的基础 URL
+ * @param {Object} env - Cloudflare环境对象
+ * @param {URL} requestUrl - 当前请求 URL
+ * @returns {URL} - 规范化后的基础 URL
+ */
+export function getPublicBaseUrl(env, requestUrl) {
+    const configured = (env?.MISUB_CALLBACK_URL || env?.MISUB_PUBLIC_URL || '').trim();
+    if (!configured) {
+        return new URL(requestUrl.origin);
+    }
+
+    const hasProtocol = /^https?:\/\//i.test(configured);
+    const normalized = hasProtocol ? configured : `https://${configured}`;
+    const baseUrl = new URL(normalized);
+    baseUrl.pathname = '';
+    baseUrl.search = '';
+    baseUrl.hash = '';
+    return baseUrl;
+}
+
+/**
  * 自定义 API 错误类
  */
 export class APIError extends Error {
@@ -353,6 +449,21 @@ export class APIError extends Error {
         this.code = code;
         this.details = details;
     }
+}
+
+/**
+ * 转义HTML特殊字符，防止XSS和Telegram解析错误
+ * @param {string} str - 需要转义的字符串
+ * @returns {string} - 转义后的字符串
+ */
+export function escapeHtml(str) {
+    if (typeof str !== 'string') return str;
+    return str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
 }
 
 /**

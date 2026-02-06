@@ -4,6 +4,11 @@ import Modal from '../forms/Modal.vue';
 import ProfileForm from './ProfileModal/ProfileForm.vue';
 import SubscriptionSelector from './ProfileModal/SubscriptionSelector.vue';
 import NodeSelector from './ProfileModal/NodeSelector.vue';
+import { useManualNodes } from '../../composables/useManualNodes.js';
+import { useDataStore } from '../../stores/useDataStore.js';
+
+const dataStore = useDataStore();
+const { manualNodeGroups } = useManualNodes(dataStore.markDirty);
 
 const props = defineProps({
   show: Boolean,
@@ -18,7 +23,7 @@ const emit = defineEmits(['update:show', 'save']);
 const localProfile = ref({});
 const subscriptionSearchTerm = ref('');
 const nodeSearchTerm = ref('');
-const activeManualNodeColorFilter = ref(null);
+const activeManualNodeGroupFilter = ref(null);
 const showAdvanced = ref(false);
 const uiText = {
   prefixTitle: '\u8282\u70b9\u524d\u7f00\u8bbe\u7f6e',
@@ -30,6 +35,7 @@ const uiText = {
   nodeTransformTitle: '\u8282\u70b9\u51c0\u5316\u7ba1\u9053'
 };
 const prefixToggleOptions = [
+  { label: '\u9ed8\u8ba4(\u5168\u5c40)', value: null },
   { label: '\u542f\u7528', value: true },
   { label: '\u7981\u7528', value: false }
 ];
@@ -155,8 +161,12 @@ const filteredSubscriptions = computed(() => {
 const filteredManualNodes = computed(() => {
   let nodes = props.allManualNodes;
 
-  if (activeManualNodeColorFilter.value) {
-    nodes = nodes.filter(n => n.colorTag === activeManualNodeColorFilter.value);
+      if (activeManualNodeGroupFilter.value) {
+    if (activeManualNodeGroupFilter.value === '默认') {
+      nodes = nodes.filter(n => !n.group);
+    } else {
+      nodes = nodes.filter(n => n.group === activeManualNodeGroupFilter.value);
+    }
   }
 
   if (!nodeSearchTerm.value) {
@@ -193,27 +203,19 @@ watch(() => props.profile, (newProfile) => {
         profileCopy.expiresAt = '';
       }
     }
-    // 初始化前缀设置
-    if (!profileCopy.prefixSettings) {
-      profileCopy.prefixSettings = {
-        enableManualNodes: true,
-        enableSubscriptions: true,
-        manualNodePrefix: '\u624b\u52a8\u8282\u70b9'
-      };
+    if (!profileCopy.prefixSettings || typeof profileCopy.prefixSettings !== 'object') {
+      profileCopy.prefixSettings = {};
     }
     profileCopy.prefixSettings.enableManualNodes =
-      profileCopy.prefixSettings.enableManualNodes ?? true;
+      profileCopy.prefixSettings.enableManualNodes ?? null;
     profileCopy.prefixSettings.enableSubscriptions =
-      profileCopy.prefixSettings.enableSubscriptions ?? true;
-    if (!profileCopy.prefixSettings.manualNodePrefix) {
-      profileCopy.prefixSettings.manualNodePrefix = '\u624b\u52a8\u8282\u70b9';
-    }
+      profileCopy.prefixSettings.enableSubscriptions ?? null;
+    profileCopy.prefixSettings.manualNodePrefix =
+      profileCopy.prefixSettings.manualNodePrefix ?? '';
     if (Object.prototype.hasOwnProperty.call(profileCopy.prefixSettings, 'enableNodeEmoji')) {
       delete profileCopy.prefixSettings.enableNodeEmoji;
     }
-    if (!profileCopy.nodeTransform) {
-      profileCopy.nodeTransform = createDefaultNodeTransform();
-    }
+    profileCopy.nodeTransform = profileCopy.nodeTransform ?? null;
     localProfile.value = profileCopy;
   } else {
     localProfile.value = { 
@@ -226,11 +228,11 @@ watch(() => props.profile, (newProfile) => {
       isPublic: true, // [新增] 默认为 true
       description: '', // [新增]
       prefixSettings: {
-        enableManualNodes: true,
-        enableSubscriptions: true,
-        manualNodePrefix: '\u624b\u52a8\u8282\u70b9'
+        enableManualNodes: null,
+        enableSubscriptions: null,
+        manualNodePrefix: ''
       },
-      nodeTransform: createDefaultNodeTransform()
+      nodeTransform: null
     };
   }
 }, { deep: true, immediate: true });
@@ -249,6 +251,7 @@ const handleConfirm = () => {
       profileToSave.expiresAt = ''; 
     }
   }
+  // 顺序已由用户通过拖拽确定，无需额外排序
   emit('save', profileToSave);
 };
 
@@ -273,14 +276,27 @@ const handleDeselectAll = (listName, sourceArray) => {
     localProfile.value[listName] = localProfile.value[listName].filter(id => !sourceIds.includes(id));
 };
 
+// 处理拖拽排序后的 ID 顺序更新
+const updateSelectedIds = (listName, newIds) => {
+    localProfile.value[listName] = newIds;
+};
+
 </script>
 
 <template>
   <Modal :show="show" @update:show="emit('update:show', $event)" @confirm="handleConfirm" size="2xl">
     <template #title>
-      <h3 class="text-lg font-bold text-gray-800 dark:text-white">
-        {{ isNew ? '新增订阅组' : '编辑订阅组' }}
-      </h3>
+      <div class="flex items-center gap-3">
+        <div class="p-2 rounded-xl bg-indigo-500/10">
+          <!-- Folder Icon for Profile -->
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+          </svg>
+        </div>
+        <h3 class="text-lg font-bold text-gray-800 dark:text-white">
+          {{ isNew ? '新增订阅组' : '编辑订阅组' }}
+        </h3>
+      </div>
     </template>
     <template #body>
       <div v-if="localProfile" class="space-y-6">
@@ -289,6 +305,7 @@ const handleDeselectAll = (listName, sourceArray) => {
           :show-advanced="showAdvanced"
           :ui-text="uiText"
           :prefix-toggle-options="prefixToggleOptions"
+          :create-default-node-transform="createDefaultNodeTransform"
           @toggle-advanced="showAdvanced = !showAdvanced"
         />
 
@@ -300,6 +317,7 @@ const handleDeselectAll = (listName, sourceArray) => {
             :search-term="subscriptionSearchTerm"
             :selected-ids="localProfile.subscriptions || []"
             @update:search-term="subscriptionSearchTerm = $event"
+            @update:selected-ids="updateSelectedIds('subscriptions', $event)"
             @toggle-selection="toggleSelection('subscriptions', $event)"
             @select-all="handleSelectAll('subscriptions', filteredSubscriptions)"
             @deselect-all="handleDeselectAll('subscriptions', filteredSubscriptions)"
@@ -309,10 +327,12 @@ const handleDeselectAll = (listName, sourceArray) => {
             :nodes="allManualNodes"
             :filtered-nodes="filteredManualNodes"
             :search-term="nodeSearchTerm"
-            :active-color-filter="activeManualNodeColorFilter"
+            :active-group-filter="activeManualNodeGroupFilter"
+            :groups="manualNodeGroups"
             :selected-ids="localProfile.manualNodes || []"
             @update:search-term="nodeSearchTerm = $event"
-            @update:color-filter="activeManualNodeColorFilter = $event"
+            @update:group-filter="activeManualNodeGroupFilter = $event"
+            @update:selected-ids="updateSelectedIds('manualNodes', $event)"
             @toggle-selection="toggleSelection('manualNodes', $event)"
             @select-all="handleSelectAll('manualNodes', filteredManualNodes)"
             @deselect-all="handleDeselectAll('manualNodes', filteredManualNodes)"
