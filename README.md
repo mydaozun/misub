@@ -480,6 +480,6 @@ http://<vps-ip>:8080
 
 **如果这个项目对你有帮助,请给个 ⭐ Star 支持一下!**
 
-Made with ❤️ by AI
+Made with ❤️ by AI and daozun
 
 </div>
