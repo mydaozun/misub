@@ -23,6 +23,14 @@ function base64Encode(str) {
 }
 
 /**
+ * URL-safe Base64 编码（SSR 标准格式）
+ * 将 + 替换为 -，/ 替换为 _，去除尾部 = padding
+ */
+function base64UrlSafeEncode(str) {
+    return base64Encode(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+/**
  * 将 Clash 代理对象转换为标准 URL
  */
 function convertClashProxyToUrl(proxy) {
@@ -61,19 +69,21 @@ function convertClashProxyToUrl(proxy) {
         }
 
         if (type === 'ssr' || type === 'shadowsocksr') {
-            const password = base64Encode(proxy.password);
-            const params = `obfs=${proxy.obfs || 'plain'}&obfsparam=${base64Encode(proxy['obfs-param'] || '')}&protocol=${proxy.protocol || 'origin'}&protoparam=${base64Encode(proxy['protocol-param'] || '')}&remarks=${base64Encode(name)}`;
+            const password = base64UrlSafeEncode(proxy.password);
+            const params = `obfs=${proxy.obfs || 'plain'}&obfsparam=${base64UrlSafeEncode(proxy['obfs-param'] || '')}&protocol=${proxy.protocol || 'origin'}&protoparam=${base64UrlSafeEncode(proxy['protocol-param'] || '')}&remarks=${base64UrlSafeEncode(name)}`;
             const ssrBody = `${server}:${port}:${proxy.protocol || 'origin'}:${proxy.cipher || 'none'}:${proxy.obfs || 'plain'}:${password}/?${params}`;
-            return `ssr://${base64Encode(ssrBody)}`;
+            return `ssr://${base64UrlSafeEncode(ssrBody)}`;
         }
 
         if (type === 'vmess') {
+            // 兼容 uuid 和 UUID 两种写法
+            const uuid = proxy.uuid || proxy.UUID || '';
             const vmessConfig = {
                 v: "2",
                 ps: name,
                 add: server,
                 port: port,
-                id: proxy.uuid || '',
+                id: uuid,
                 aid: proxy.alterId || 0,
                 net: proxy.network || 'tcp',
                 type: 'none',
@@ -103,6 +113,10 @@ function convertClashProxyToUrl(proxy) {
         }
 
         if (type === 'vless') {
+            // 兼容 uuid 和 UUID 两种写法
+            const uuid = proxy.uuid || proxy.UUID;
+            if (!uuid) return null; // UUID 是必需的
+
             const params = ['encryption=none'];
             if (proxy.network) params.push(`type=${proxy.network}`);
 
@@ -112,10 +126,26 @@ function convertClashProxyToUrl(proxy) {
                 if (wsOpts.headers?.Host) params.push(`host=${encodeURIComponent(wsOpts.headers.Host)}`);
             }
 
-            if (proxy.tls) params.push('security=tls');
-            if (proxy.flow) params.push(`flow=${proxy.flow}`);
+            // Reality 协议支持
+            const realityOpts = proxy['reality-opts'];
+            if (realityOpts) {
+                params.push('security=reality');
+                if (realityOpts['public-key']) params.push(`pbk=${encodeURIComponent(realityOpts['public-key'])}`);
+                if (realityOpts['short-id']) params.push(`sid=${encodeURIComponent(realityOpts['short-id'])}`);
+            } else if (proxy.tls) {
+                params.push('security=tls');
+            }
 
-            return `vless://${proxy.uuid}@${server}:${port}?${params.join('&')}#${encodeURIComponent(name)}`;
+            if (proxy.flow) params.push(`flow=${proxy.flow}`);
+            // 兼容 servername 和 sni
+            if (proxy.servername || proxy.sni) params.push(`sni=${encodeURIComponent(proxy.servername || proxy.sni)}`);
+            // 兼容 client-fingerprint
+            if (proxy['client-fingerprint']) params.push(`fp=${encodeURIComponent(proxy['client-fingerprint'])}`);
+
+            // dialer-proxy 链式代理支持 (使用自定义参数 dp)
+            if (proxy['dialer-proxy']) params.push(`dp=${encodeURIComponent(proxy['dialer-proxy'])}`);
+
+            return `vless://${uuid}@${server}:${port}?${params.join('&')}#${encodeURIComponent(name)}`;
         }
 
         if (type === 'hysteria2') {
